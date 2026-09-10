@@ -14,3 +14,6 @@ Main memory is divided into equal-size **frames**. A job is divided into equal-s
 
 ### The Basic Idea
 ![Paging GIF](docs/csci460_page_to_frame_assignment.gif)
+
+## Rough Software Architecture
+![SW_Arch](docs/page_system_sim_arch_img.png)
