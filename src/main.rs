@@ -12,15 +12,6 @@ mod memory_controller;
 use crate::memory_controller::Job;
 use crate::memory_controller::FrameTableEntry;
 
-const ADMIT_NEW_JOB: u8 = 0;
-const REMOVE_JOB: u8 = 1;
-const SUSPEND_JOB: u8 = 2;
-const RESUME_JOB: u8 = 3;
-const TRANSLATE_ADDR: u8 = 4;
-const PRINT: u8 = 5;
-const EXIT: u8 = 6;
-const ERROR: u8 = 255;
-
 fn main() {
     
     // Paging System Variables
@@ -49,7 +40,7 @@ fn main() {
         println!("Num Frames: {}", num_frames);
         println!("Free Frames: {}", free_frames);
 
-        match input_file_handle(&args[3]) {
+        match input_file_handle(&args[3], &job_list, &frame_table, &resident_jobs, memory_size, frame_size, num_frames, free_frames) {
             Ok(_) => {},
             Err(e) => eprintln!("Error reading file: {}", e),
         }
@@ -65,20 +56,36 @@ fn main() {
 
     // Main Loop
     while running {
-       
+        
     }
 
 }
 
 
-fn input_file_handle(in_file: &String) -> Result<(), io::Error> {
+fn input_file_handle(in_file: &String, job_list: &Vec<Job>, frame_table: &Vec<FrameTableEntry>, job_fifo: &VecDeque<u32>,
+                     mem_size: u32, frame_size: u32, num_frames: u32, free_frames: u32) -> Result<(), io::Error> {
 
     let file = File::open(in_file)?;
     let reader = BufReader::new(file);
 
     for line in reader.lines() {
+        let mut action: u8 = 0;
+        
+        // Break apart a line by whitespace
         let line = line?;
-        println!("{}", line);
+        let symbols: Vec<&str> = line.split_whitespace().collect();
+
+        // Parsing "print" and "exit"   
+        if symbols.len() == 1 {
+            action = command_parser(symbols[0].to_string(), 0);
+        }
+        // Parsing all other commands
+        else if symbols.len() > 1 {
+            let arg1 = symbols[1].parse::<i32>().unwrap();
+            action = command_parser(symbols[0].to_string(), arg1);
+        }
+
+        memory_controller::mem_control(action, symbols, job_list, frame_table, job_fifo, mem_size, frame_size, num_frames, free_frames);
     }
 
     Ok(())
@@ -86,34 +93,34 @@ fn input_file_handle(in_file: &String) -> Result<(), io::Error> {
 
 fn command_parser(command: String, arg1: i32) -> u8 {
 
-    if command == "J" {
+    if command.parse::<u32>().is_ok() {
         if arg1 > 0 {
-            return ADMIT_NEW_JOB;
+            return memory_controller::ADMIT_NEW_JOB;
         }
         else if arg1 == 0 {
-            return REMOVE_JOB;
+            return memory_controller::REMOVE_JOB;
         }
         else if arg1 == -1 {
-            return SUSPEND_JOB;
+            return memory_controller::SUSPEND_JOB;
         }
         else if arg1 == -2 {
-            return RESUME_JOB;
+            return memory_controller::RESUME_JOB;
         }
         else {
-            return ERROR;
+            return memory_controller::ERROR;
         }
     }
     else if command == "translate" {
-        return TRANSLATE_ADDR;
+        return memory_controller::TRANSLATE_ADDR;
     }
     else if command == "print" {
-        return PRINT;
+        return memory_controller::PRINT;
     }
     else if command == "exit" {
-        return EXIT;
+        return memory_controller::EXIT;
     }
     else {
-        return ERROR;
+        return memory_controller::ERROR;
     }
 
 }
