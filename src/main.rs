@@ -29,6 +29,7 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() == 4 
     {
+        // ------- Set up Memory System -------
         memory_size = args[1].parse::<u32>().unwrap();
         frame_size = args[2].parse::<u32>().unwrap();
 
@@ -40,7 +41,13 @@ fn main() {
         println!("Num Frames: {}", num_frames);
         println!("Free Frames: {}", free_frames);
 
-        match input_file_handle(&args[3], &job_list, &frame_table, &resident_jobs, memory_size, frame_size, num_frames, free_frames) {
+        // Create frame table
+        for _i in 1..=num_frames {
+            let new_ft_entry = FrameTableEntry::new(memory_controller::FRAME_FREE, 0, 0);
+            frame_table.push(new_ft_entry);
+        }
+
+        match input_file_handle(&args[3], &mut job_list, &mut frame_table, &mut resident_jobs, memory_size, frame_size, num_frames, &mut free_frames) {
             Ok(_) => {},
             Err(e) => eprintln!("Error reading file: {}", e),
         }
@@ -62,36 +69,58 @@ fn main() {
 }
 
 
-fn input_file_handle(in_file: &String, job_list: &Vec<Job>, frame_table: &Vec<FrameTableEntry>, job_fifo: &VecDeque<u32>,
-                     mem_size: u32, frame_size: u32, num_frames: u32, free_frames: u32) -> Result<(), io::Error> {
+/**
+ * Parses input file from CLI arguments. 
+ */
+fn input_file_handle(in_file: &String, job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, job_fifo: &mut VecDeque<u32>,
+                     mem_size: u32, frame_size: u32, num_frames: u32, free_frames: &mut u32) -> Result<(), io::Error> {
 
     let file = File::open(in_file)?;
     let reader = BufReader::new(file);
 
+    let mut status: u32;
+
     for line in reader.lines() {
-        let mut action: u8 = 0;
+        let mut action: u32 = 0;
         
         // Break apart a line by whitespace
         let line = line?;
         let symbols: Vec<&str> = line.split_whitespace().collect();
-
+    
         // Parsing "print" and "exit"   
         if symbols.len() == 1 {
             action = command_parser(symbols[0].to_string(), 0);
         }
-        // Parsing all other commands
+        // All other commands
         else if symbols.len() > 1 {
-            let arg1 = symbols[1].parse::<i32>().unwrap();
-            action = command_parser(symbols[0].to_string(), arg1);
+            // Optional header
+            if symbols[0] == "Job_ID" && symbols[1] == "Size" {
+                action = memory_controller::HEADER;
+            }
+            // All other 2+ arg commands
+            else {
+                let arg1 = symbols[1].parse::<i32>().unwrap();
+                action = command_parser(symbols[0].to_string(), arg1);
+            }
         }
 
-        memory_controller::mem_control(action, symbols, job_list, frame_table, job_fifo, mem_size, frame_size, num_frames, free_frames);
+        status = memory_controller::mem_control(action, symbols, job_list, frame_table, job_fifo, mem_size, frame_size, num_frames, free_frames);
+        if status != memory_controller::OKAY {
+            error_handler(status);
+        }
+
+
+
     }
 
     Ok(())
 }
 
-fn command_parser(command: String, arg1: i32) -> u8 {
+
+/**
+ * Takes in a written command and returns the proper command ID
+ */
+fn command_parser(command: String, arg1: i32) -> u32 {
 
     if command.parse::<u32>().is_ok() {
         if arg1 > 0 {
@@ -123,4 +152,9 @@ fn command_parser(command: String, arg1: i32) -> u8 {
         return memory_controller::ERROR;
     }
 
+}
+
+
+fn error_handler(error_code: u32) {
+    println!("Error handler");
 }
