@@ -134,7 +134,8 @@ pub fn mem_control(action: u32, args: &Vec<&str>, job_list: &mut Vec<Job>, frame
         TRANSLATE_ADDR=> 
         {
             // args[1] = Job ID, args[2] = Logical Address
-            status = translate_addr(job_list, args[1].parse::<u32>().unwrap(), args[2].parse::<u32>().unwrap(), frame_size);
+
+            status = translate_addr(job_list, args[1].parse::<u32>().unwrap(), args[2].parse::<i32>().unwrap(), frame_size);
 
         },
         PRINT=> 
@@ -393,7 +394,16 @@ fn resume_job(job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, j
 /// 
 /// - `u32` - Status code
 /// 
-fn translate_addr(job_list: &Vec<Job>, job_num: u32, addr: u32, frame_size: u32) -> u32 {
+fn translate_addr(job_list: &Vec<Job>, job_num: u32, signed_addr: i32, frame_size: u32) -> u32 {
+
+    let addr: u32;
+    if signed_addr >= 0 {
+        addr = signed_addr as u32;
+    }
+    else {
+        println!("ERROR: Out of bounds memory access! Job: {} @ address {}", job_num, signed_addr);
+        return INVALID_ADDR;
+    }
 
     for job in job_list {
         if job.number == job_num {
