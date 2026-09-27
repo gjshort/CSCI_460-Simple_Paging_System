@@ -29,6 +29,10 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() == 4 
     {
+
+        // WARNING: MINIMAL TO NO ERROR CHECKING. BAD CLI ARGUMENTS
+        // MAY CAUSE RUNTIME CRASHES (ex: memory_size < frame_size)
+
         // ------- Set up Memory System -------
         memory_size = args[1].parse::<u32>().unwrap();
         frame_size = args[2].parse::<u32>().unwrap();
@@ -69,9 +73,27 @@ fn main() {
 }
 
 
-/**
- * Parses input file from CLI arguments. 
- */
+/// Parses input file from CLI arguments. 
+/// 
+/// # Arguments
+/// 
+/// - `in_file` (`&String`) - Describe this parameter.
+/// - `job_list` (`&mut Vec<Job>`) - List of all jobs in the system
+/// - `frame_table` (`&mut Vec<FrameTableEntry>`) - Maps taken frames to page and job numbers
+/// - `job_fifo` (`&mut VecDeque<u32>`) - FIFO of job numbers admitted into main memory
+/// - `mem_size` (`u32`) - Size of the main memory in bytes
+/// - `frame_size` (`u32`) - Size of each page/frame in bytes
+/// - `num_frames` (`u32`) - Number of frames in main memory
+/// - `free_frames` (`&mut u32`) - Number of free frames in main memory
+/// 
+/// # Returns
+/// 
+/// - `Result<(), io::Error>`
+/// 
+/// # Errors
+/// 
+/// Possible errors from Buffered Reader line fetching.
+/// 
 fn input_file_handle(in_file: &String, job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, job_fifo: &mut VecDeque<u32>,
                      mem_size: u32, frame_size: u32, num_frames: u32, free_frames: &mut u32) -> Result<(), io::Error> {
 
@@ -104,6 +126,7 @@ fn input_file_handle(in_file: &String, job_list: &mut Vec<Job>, frame_table: &mu
             }
         }
 
+        // Call memory controller on the current command
         status = memory_controller::mem_control(action, symbols, job_list, frame_table, job_fifo, mem_size, frame_size, num_frames, free_frames);
         if status != memory_controller::OKAY {
             error_handler(status);
@@ -120,6 +143,20 @@ fn input_file_handle(in_file: &String, job_list: &mut Vec<Job>, frame_table: &mu
 /**
  * Takes in a written command and returns the proper command ID
  */
+
+/// Maps the received command by the program to a memory controller action
+/// 
+/// 
+/// # Arguments
+/// 
+/// - `command` (`String`) - Received command from CLI or input file
+/// - `arg1` (`i32`) - First argument for commands requiring one or mpre.
+///                    Ignored for commands not requiring arguments.
+/// 
+/// # Returns
+/// 
+/// - `u32` - Memory controller action
+/// 
 fn command_parser(command: String, arg1: i32) -> u32 {
 
     if command.parse::<u32>().is_ok() {
@@ -156,5 +193,5 @@ fn command_parser(command: String, arg1: i32) -> u32 {
 
 
 fn error_handler(error_code: u32) {
-    println!("Error handler");
+    println!("!! === MEMORY CONTROLLER ERROR: {} === !!", error_code);
 }

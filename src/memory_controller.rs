@@ -2,10 +2,9 @@
  * Memory Controller 
  */
 
-use std::{collections::VecDeque, ptr::read};
+use std::{collections::VecDeque};
 
-pub const OKAY:           u32 = 0;
-
+// Memory Controller Actions
 pub const ADMIT_NEW_JOB:  u32 = 10;
 pub const REMOVE_JOB:     u32 = 11;
 pub const SUSPEND_JOB:    u32 = 12;
@@ -14,18 +13,31 @@ pub const TRANSLATE_ADDR: u32 = 14;
 pub const PRINT:          u32 = 15;
 pub const EXIT:           u32 = 16;
 pub const HEADER:         u32 = 17;
-pub const ERROR:          u32 = 255;
 
+// Memory controller error codes
+pub const OKAY:           u32 = 0;
 pub const DUPLICATE_JOB:  u32 = 20;
 pub const MASSIVE_JOB:    u32 = 21;
 pub const INVALID_JOB:    u32 = 22;
-pub const MEMORY_FULL:    u32 = 23;
+pub const ERROR:          u32 = 255;
 
+// Frame and Page markers
 pub const RESIDENT:      bool = true;
 pub const SUSPENDED:     bool = false;
 pub const FRAME_TAKEN:   bool = true;
 pub const FRAME_FREE:    bool = false;
 
+
+/// Struct to hold a Job for the system
+/// 
+/// # Fields
+/// 
+/// - `number` (`u32`) - Job ID number
+/// - `status` (`bool`) - True = resident, FALSE = suspended
+/// - `size` (`u32`) - size of job in bytes
+/// - `int_frag` (`u32`) - internal fragmentation from last page
+/// - `page_table` (`Vec<u32>`) - Map from pages to frames in main memory
+/// 
 pub struct Job {
     number: u32,
     status: bool,
@@ -34,26 +46,60 @@ pub struct Job {
     page_table: Vec<u32>
 }
 
+
+/// Entry into the frame table that indicates whether the frame is taken or not.
+/// If taken, describes which job and which page of that job is using it.
+/// 
+/// # Fields
+/// 
+/// - `status` (`bool`) - True = frame taken, False = frame free
+/// - `job_number` (`u32`) - If taken: Job ID number associated with the frame.
+///                          If free: N/A
+/// - `page_number` (`u32`) - If taken: Page number associated with the frame.
+///                           If free: N/A
+/// 
 pub struct FrameTableEntry {
     status: bool,
     job_number: u32,
     page_number: u32
 }
 
+/// Public Frame Table Entry constructor for external use
+/// 
+/// # Arguments
+/// 
+/// (See struct implementation for arguments)
+/// 
+/// # Returns
+/// 
+/// - `Self`
+/// 
 impl FrameTableEntry {
-    // Public constructor method
     pub fn new(status: bool, job_number: u32, page_number: u32)-> Self {
-        // Direct instantiation is perfectly valid inside the defining module
-        FrameTableEntry { status, job_number, page_number }
-            
+        FrameTableEntry { status, job_number, page_number }    
     }
 }
 
 
-/**
- * Public entry point into the memory controller
- * Control is accomplished through the 'action' arg
- */
+/// Public entry point into the memory controller.
+/// 
+/// # Arguments
+/// 
+/// - `action` (`u32`) - What the caller wants to do with the memory controller.
+///                      See constants defined above.
+/// - `args` (`Vec<&str>`) - Stripped CLI arguments. Action-specific.
+/// - `job_list` (`&mut Vec<Job>`) - List of all jobs in the system
+/// - `frame_table` (`&mut Vec<FrameTableEntry>`) - Maps taken frames to page and job numbers
+/// - `job_fifo` (`&mut VecDeque<u32>`) - FIFO of job numbers admitted into main memory
+/// - `mem_size` (`u32`) - Size of the main memory in bytes
+/// - `frame_size` (`u32`) - Size of each page/frame in bytes
+/// - `num_frames` (`u32`) - Number of frames in main memory
+/// - `free_frames` (`&mut u32`) - Number of free frames in main memory
+/// 
+/// # Returns
+/// 
+/// - `u32` - Status code
+/// 
 pub fn mem_control(action: u32, args: Vec<&str>, job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, job_fifo: &mut VecDeque<u32>,
                    mem_size: u32, frame_size: u32, num_frames: u32, free_frames: &mut u32) -> u32 {
     
@@ -102,10 +148,24 @@ pub fn mem_control(action: u32, args: Vec<&str>, job_list: &mut Vec<Job>, frame_
 }
 
 
-/**
- * Admits a job into memory or rejects it for 
- * being too large or a duplicate
- */
+/// Admits a job into memory or rejects it for being too large or a duplicate
+/// 
+/// # Arguments
+/// 
+/// - `job_list` (`&mut Vec<Job>`) - List of all jobs in the system
+/// - `frame_table` (`&mut Vec<FrameTableEntry>`) - Maps taken frames to page and job numbers
+/// - `job_fifo` (`&mut VecDeque<u32>`) - FIFO of job numbers admitted into main memory
+/// - `num` (`u32`) - Job number to be admitted
+/// - `size` (`u32`) - Size of job to be admitted
+/// - `mem_size` (`u32`) - Size of main memory in bytes
+/// - `frame_size` (`u32`) - Size of each page/frame in bytes
+/// - `num_frames` (`u32`) - Number of frames in main memory
+/// - `free_frames` (`&mut u32`) - Number of free frames in main memory
+/// 
+/// # Returns
+/// 
+/// - `u32` - Status code
+/// 
 fn admit_job(job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, job_fifo: &mut VecDeque<u32>,
             num: u32, size: u32, mem_size: u32, frame_size: u32, num_frames: u32, free_frames: &mut u32) -> u32 {
 
@@ -161,6 +221,20 @@ fn admit_job(job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, jo
 }
 
 
+/// Removes a Job from the system permanently
+/// 
+/// # Arguments
+/// 
+/// - `job_list` (`&mut Vec<Job>`) - List of all jobs in the system
+/// - `frame_table` (`&mut Vec<FrameTableEntry>`) - Maps taken frames to page and job numbers
+/// - `job_fifo` (`&mut VecDeque<u32>`) - FIFO of job numbers admitted into main memory
+/// - `num` (`u32`) - Job number to be removed.
+/// - `free_frames` (`&mut u32`) - Number of free frames in main memory
+/// 
+/// # Returns
+/// 
+/// - `u32` - Status code
+/// 
 fn remove_job(job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, job_fifo: &mut VecDeque<u32>, num: u32, free_frames: &mut u32) -> u32 {
 
     // Check if job # matches "num"
@@ -203,6 +277,20 @@ fn remove_job(job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, j
 }
 
 
+/// Suspends a job by moving it from main memory to secondary storage.
+/// 
+/// # Arguments
+/// 
+/// - `job_list` (`&mut Vec<Job>`) - List of all jobs in the system
+/// - `frame_table` (`&mut Vec<FrameTableEntry>`) - Maps taken frames to page and job numbers
+/// - `job_fifo` (`&mut VecDeque<u32>`) - FIFO of job numbers admitted into main memory
+/// - `num` (`u32`) - Job number to be suspended.
+/// - `free_frames` (`&mut u32`) - Number of free frames in main memory
+/// 
+/// # Returns
+/// 
+/// - `u32` - Status code
+/// 
 fn suspend_job(job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, job_fifo: &mut VecDeque<u32>, num: u32, free_frames: &mut u32) -> u32 {
 
     for i in 0..job_list.len() {
@@ -247,6 +335,20 @@ fn suspend_job(job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, 
 }
 
 
+/// Resumes a job by moving it from secondary storage to main memory.
+/// 
+/// # Arguments
+/// 
+/// - `job_list` (`&mut Vec<Job>`) - List of all jobs in the system
+/// - `frame_table` (`&mut Vec<FrameTableEntry>`) - Maps taken frames to page and job numbers
+/// - `job_fifo` (`&mut VecDeque<u32>`) - FIFO of job numbers admitted into main memory
+/// - `num` (`u32`) - Job number to be resumed.
+/// - `free_frames` (`&mut u32`) - Number of free frames in main memory
+/// 
+/// # Returns
+/// 
+/// - `u32` - Status code
+/// 
 fn resume_job(job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, job_fifo: &mut VecDeque<u32>, num: u32, free_frames: &mut u32) -> u32 {
 
     for i in 0..job_list.len() {
@@ -279,6 +381,20 @@ fn translate_addr(job_list: &Vec<Job>, job_num: u32, addr: u32) -> (u32, u32) {
 }
 
 
+/// Prints the status of the system: frame table and per-job page tables
+/// 
+/// # Arguments
+/// 
+/// - `job_list` (`&mut Vec<Job>`) - List of all jobs in the system
+/// - `frame_table` (`&mut Vec<FrameTableEntry>`) - Maps taken frames to page and job numbers
+/// - `job_fifo` (`&mut VecDeque<u32>`) - FIFO of job numbers admitted into main memory
+/// 
+/// # Returns
+/// 
+/// - `u32` - Status code
+/// 
+/// # Examples
+/// 
 fn print_system(job_list: &Vec<Job>, frame_table: &Vec<FrameTableEntry>, job_fifo: &VecDeque<u32>) -> u32 {
     let mut status: u32 = OKAY;
     
@@ -348,6 +464,25 @@ fn exit() {
  * Only adds them to the resident FIFO, caller needs to make sure
  * they are in the Job list if they aren't already.
  */
+
+/// Mechanism to actually move jobs into main memory.
+/// Suspends resident jobs in FIFO order until there is sufficient room.
+/// 
+/// 
+/// # Arguments
+/// 
+/// - `job_index` (`usize`) - Location in `job_list` of the job to be admitted.
+/// - `job_list` (`&mut Vec<Job>`) - List of all jobs in the system
+/// - `frame_table` (`&mut Vec<FrameTableEntry>`) - Maps taken frames to page and job numbers
+/// - `job_fifo` (`&mut VecDeque<u32>`) - FIFO of job numbers admitted into main memory
+/// - `free_frames` (`&mut u32`) - Number of free frames in main memory
+/// 
+/// !! Assumes job exists in `job_list` !!
+/// 
+/// # Returns
+/// 
+/// - `u32` - Status code
+/// 
 fn job_admission(job_index: usize, job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, job_fifo: &mut VecDeque<u32>,
                  free_frames: &mut u32) -> u32 {
 
@@ -364,8 +499,7 @@ fn job_admission(job_index: usize, job_list: &mut Vec<Job>, frame_table: &mut Ve
             else {
                 println!("ERROR: Out of bound Job FIFO access!");
                 return ERROR;
-            }
-                  
+            }          
         }
         else {
             break;
@@ -395,6 +529,8 @@ fn job_admission(job_index: usize, job_list: &mut Vec<Job>, frame_table: &mut Ve
 
                         // Update job's PT
                         ready_job.page_table[page_ptr] = frame_num as u32;
+
+                        // Exit loop if all pages are loaded
                         if page_ptr >= ready_job.page_table.len()-1 {
                             job_loaded = true;
                             break;
