@@ -2,7 +2,7 @@
  * Memory Controller 
  */
 
-use std::collections::VecDeque;
+use std::{collections::VecDeque, ptr::read};
 
 pub const OKAY:           u32 = 0;
 
@@ -19,6 +19,7 @@ pub const ERROR:          u32 = 255;
 pub const DUPLICATE_JOB:  u32 = 20;
 pub const MASSIVE_JOB:    u32 = 21;
 pub const INVALID_JOB:    u32 = 22;
+pub const MEMORY_FULL:    u32 = 23;
 
 pub const RESIDENT:      bool = true;
 pub const SUSPENDED:     bool = false;
@@ -68,14 +69,18 @@ pub fn mem_control(action: u32, args: Vec<&str>, job_list: &mut Vec<Job>, frame_
         REMOVE_JOB=> 
         {
             // args[0] = Job ID
-            status = remove_job(job_list, frame_table, job_fifo, args[0].parse::<u32>().unwrap());
+            status = remove_job(job_list, frame_table, job_fifo, args[0].parse::<u32>().unwrap(), free_frames);
         },
         SUSPEND_JOB=> 
         {
             // args[0] = Job ID
-            status = suspend_job(job_list, frame_table, job_fifo, args[0].parse::<u32>().unwrap());
+            status = suspend_job(job_list, frame_table, job_fifo, args[0].parse::<u32>().unwrap(), free_frames);
         },
-        RESUME_JOB=> {},
+        RESUME_JOB=> 
+        {
+            // args[0] = Job ID
+            status = resume_job(job_list, frame_table, job_fifo, args[0].parse::<u32>().unwrap(), free_frames);
+        },
         TRANSLATE_ADDR=> {},
         PRINT=> 
         { 
@@ -149,16 +154,14 @@ fn admit_job(job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, jo
     };
 
     // --------- Admit Job into System ---------
-    status = job_admission(&mut new_job, job_list, frame_table, job_fifo, free_frames); 
-    if status == OKAY {
-        job_list.push(new_job); 
-    }
+    job_list.push(new_job);
+    status = job_admission(job_list.len()-1, job_list, frame_table, job_fifo, free_frames); 
 
     return status;
 }
 
 
-fn remove_job(job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, job_fifo: &mut VecDeque<u32>, num: u32) -> u32 {
+fn remove_job(job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, job_fifo: &mut VecDeque<u32>, num: u32, free_frames: &mut u32) -> u32 {
 
     // Check if job # matches "num"
     // If so, update the frame table based on PT
@@ -171,6 +174,7 @@ fn remove_job(job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, j
                 // Update frame table for every entry in the job's page table
                 for page in 0..job.page_table.len() {
                     frame_table[job.page_table[page] as usize].status = FRAME_FREE;
+                    *free_frames += 1;
                 }
 
                 // Remove job from FIFO
@@ -184,6 +188,7 @@ fn remove_job(job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, j
 
                 // Remove Job from system
                 job_list.remove(i);
+
                 return OKAY;
             }
         }
@@ -198,7 +203,7 @@ fn remove_job(job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, j
 }
 
 
-fn suspend_job(job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, job_fifo: &mut VecDeque<u32>, num: u32) -> u32 {
+fn suspend_job(job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, job_fifo: &mut VecDeque<u32>, num: u32, free_frames: &mut u32) -> u32 {
 
     for i in 0..job_list.len() {
         
@@ -214,6 +219,7 @@ fn suspend_job(job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, 
                 // Update frame table for every entry in the job's page table
                 for page in 0..job.page_table.len() {
                     frame_table[job.page_table[page] as usize].status = FRAME_FREE;
+                    *free_frames += 1;
                 }
 
                 // Remove job from FIFO
@@ -244,40 +250,34 @@ fn suspend_job(job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, 
 fn resume_job(job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, job_fifo: &mut VecDeque<u32>, num: u32, free_frames: &mut u32) -> u32 {
 
     for i in 0..job_list.len() {
-        
-        if let Some(job) = job_list.get_mut(i) {
-            if job.number == num {
 
-                // Check if already resident
-                if job.status == RESIDENT {
-                    println!("ERROR: Job {} is already running", num);
-                    return ERROR;
-                }
+       if job_list[i].number == num {
 
-                // Try to admit job
-                if job_admission(job, job_list, frame_table, job_fifo, free_frames) != OKAY {
-                    println!("ERROR: Could not resume job {}", num);
-                }
-
-                job_list.push(job); // TODO
-
-                return OKAY;
+            // Check if already resident
+            if job_list[i].status == RESIDENT {
+                println!("ERROR: Job {} is already running", num);
+                return ERROR;
             }
+            // Try to admit job
+            if job_admission(i, job_list, frame_table, job_fifo, free_frames) != OKAY {
+                println!("ERROR: Could not resume job {}", num);
+            }
+
+            return OKAY;
         }
-        else {
-            println!("ERROR: Out of bounds job list access!");
-            return ERROR;
-        }
+
     }
 
     println!("ERROR: Job {} cannot be resumed because it doesn't exist.", num);
     return INVALID_JOB;
 }
 
+
 fn translate_addr(job_list: &Vec<Job>, job_num: u32, addr: u32) -> (u32, u32) {
 
     return (0,0);
 }
+
 
 fn print_system(job_list: &Vec<Job>, frame_table: &Vec<FrameTableEntry>, job_fifo: &VecDeque<u32>) -> u32 {
     let mut status: u32 = OKAY;
@@ -343,55 +343,84 @@ fn exit() {
 }
 
 
-fn job_admission(ready_job: &mut Job, job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, job_fifo: &mut VecDeque<u32>,
+/**
+ * Admits jobs into main memory. 
+ * Only adds them to the resident FIFO, caller needs to make sure
+ * they are in the Job list if they aren't already.
+ */
+fn job_admission(job_index: usize, job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, job_fifo: &mut VecDeque<u32>,
                  free_frames: &mut u32) -> u32 {
 
     let mut status: u32 = OKAY;
 
-    if ready_job.page_table.len() > *free_frames as usize {
-        // Evict jobs until there is enough free space
-    }
+    // Evict jobs until there is enough free space
+    for job_num in 0..job_fifo.len() {
 
-    // Load job into memory one frame at a time
-    let mut page_ptr: usize = 0;
-    let mut job_loaded: bool = false;
-
-    while !job_loaded {
-
-        // Check for first available free frames
-        for frame_num in 0..frame_table.len() {
-            if let Some(ft_entry) = frame_table.get_mut(frame_num as usize) {
-
-                if ft_entry.status == FRAME_FREE {
-
-                    // Add job's page info to FT
-                    ft_entry.status = FRAME_TAKEN;
-                    ft_entry.job_number = ready_job.number;
-                    ft_entry.page_number = page_ptr as u32;
-                    *free_frames -= 1;
-
-                    // Update job's PT
-                    ready_job.page_table[page_ptr] = frame_num as u32;
-                    if page_ptr >= ready_job.page_table.len()-1 {
-                        job_loaded = true;
-                        break;
-                    }
-                    else {
-                        page_ptr += 1;
-                    }
-                }
+        if job_list[job_index].page_table.len() > *free_frames as usize {
+            // Evict from head of FIFO
+            if let Some(evict_job) = job_fifo.front() {
+                suspend_job(job_list, frame_table, job_fifo, *evict_job, free_frames);  
             }
             else {
-                println!("ERROR: Out of bounds frame table access!");
+                println!("ERROR: Out of bound Job FIFO access!");
                 return ERROR;
             }
+                  
         }
-            
+        else {
+            break;
+        }
+
     }
 
-    // -------- Update Job Control Info ---------
-    ready_job.status = RESIDENT;
-    job_fifo.push_back(ready_job.number);
+    if let Some(ready_job) = job_list.get_mut(job_index) {
+
+        // Load job into memory one frame at a time
+        let mut page_ptr: usize = 0;
+        let mut job_loaded: bool = false;
+
+        while !job_loaded {
+
+            // Check for first available free frames
+            for frame_num in 0..frame_table.len() {
+                if let Some(ft_entry) = frame_table.get_mut(frame_num as usize) {
+
+                    if ft_entry.status == FRAME_FREE {
+
+                        // Add job's page info to FT
+                        ft_entry.status = FRAME_TAKEN;
+                        ft_entry.job_number = ready_job.number;
+                        ft_entry.page_number = page_ptr as u32;
+                        *free_frames -= 1;
+
+                        // Update job's PT
+                        ready_job.page_table[page_ptr] = frame_num as u32;
+                        if page_ptr >= ready_job.page_table.len()-1 {
+                            job_loaded = true;
+                            break;
+                        }
+                        else {
+                            page_ptr += 1;
+                        }
+                    }
+                }
+                else {
+                    println!("ERROR: Out of bounds frame table access!");
+                    return ERROR;
+                }
+            }
+                
+        }
+
+        // -------- Update Job Control Info ---------
+        ready_job.status = RESIDENT;
+        job_fifo.push_back(ready_job.number);    
+
+    }
+    else {
+        println!("ERROR: Out of bounds job list access!");
+        return ERROR;
+    }
 
     return status;
 
