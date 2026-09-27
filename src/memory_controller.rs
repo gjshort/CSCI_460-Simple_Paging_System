@@ -1,5 +1,8 @@
 /*
  * Memory Controller 
+ * 
+ * Used Rust Doc string for auto generated function docs
+ * 
  */
 
 use std::{collections::VecDeque};
@@ -19,6 +22,7 @@ pub const OKAY:           u32 = 0;
 pub const DUPLICATE_JOB:  u32 = 20;
 pub const MASSIVE_JOB:    u32 = 21;
 pub const INVALID_JOB:    u32 = 22;
+pub const INVALID_ADDR:   u32 = 23;
 pub const ERROR:          u32 = 255;
 
 // Frame and Page markers
@@ -100,7 +104,7 @@ impl FrameTableEntry {
 /// 
 /// - `u32` - Status code
 /// 
-pub fn mem_control(action: u32, args: Vec<&str>, job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, job_fifo: &mut VecDeque<u32>,
+pub fn mem_control(action: u32, args: &Vec<&str>, job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, job_fifo: &mut VecDeque<u32>,
                    mem_size: u32, frame_size: u32, num_frames: u32, free_frames: &mut u32) -> u32 {
     
     let mut status: u32 = ERROR;
@@ -127,12 +131,20 @@ pub fn mem_control(action: u32, args: Vec<&str>, job_list: &mut Vec<Job>, frame_
             // args[0] = Job ID
             status = resume_job(job_list, frame_table, job_fifo, args[0].parse::<u32>().unwrap(), free_frames);
         },
-        TRANSLATE_ADDR=> {},
+        TRANSLATE_ADDR=> 
+        {
+            // args[1] = Job ID, args[2] = Logical Address
+            status = translate_addr(job_list, args[1].parse::<u32>().unwrap(), args[2].parse::<u32>().unwrap(), frame_size);
+
+        },
         PRINT=> 
         { 
             status = print_system(job_list, frame_table, job_fifo);
         },
-        EXIT=> {},
+        EXIT=> 
+        {
+            return EXIT;
+        },
         HEADER=>
         {
             status = OKAY;
@@ -251,13 +263,15 @@ fn remove_job(job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, j
                     *free_frames += 1;
                 }
 
-                // Remove job from FIFO
-                if let Some(index) = job_fifo.iter().position(|x| *x == num) {
-                    job_fifo.remove(index);
-                }
-                else {
-                    println!("ERROR: Out of bounds Job FIFO access!");
-                    return ERROR;
+                // Remove job from FIFO if resident
+                if job.status == RESIDENT {
+                    if let Some(index) = job_fifo.iter().position(|x| *x == num) {
+                        job_fifo.remove(index);
+                    }
+                    else {
+                        println!("ERROR: Out of bounds Job FIFO access!");
+                        return ERROR;
+                    }
                 }
 
                 // Remove Job from system
@@ -308,15 +322,6 @@ fn suspend_job(job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, 
                 for page in 0..job.page_table.len() {
                     frame_table[job.page_table[page] as usize].status = FRAME_FREE;
                     *free_frames += 1;
-                }
-
-                // Remove job from FIFO
-                if let Some(index) = job_fifo.iter().position(|x| *x == num) {
-                    job_fifo.remove(index);
-                }
-                else {
-                    println!("ERROR: Out of bounds Job FIFO access!");
-                    return ERROR;
                 }
 
                 // Mark job as suspended
@@ -375,9 +380,60 @@ fn resume_job(job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, j
 }
 
 
-fn translate_addr(job_list: &Vec<Job>, job_num: u32, addr: u32) -> (u32, u32) {
+/// Converts a logical address for a job into its physical address
+/// 
+/// # Arguments
+/// 
+/// - `job_list` (`&Vec<Job>`) - List of all jobs in the system
+/// - `job_num` (`u32`) - Job number for the address translation
+/// - `addr` (`u32`) - Logical address
+/// - `frame_size` (`u32`) - Size of each page/frame in bytes
+/// 
+/// # Returns
+/// 
+/// - `u32` - Status code
+/// 
+fn translate_addr(job_list: &Vec<Job>, job_num: u32, addr: u32, frame_size: u32) -> u32 {
 
-    return (0,0);
+    for job in job_list {
+        if job.number == job_num {
+
+            if job.status == SUSPENDED {
+                println!("ERROR: Suspended Job {} has no physical address translation", job_num);
+                return INVALID_JOB;
+            }
+
+            let page_num = addr / frame_size; // 0,1,2,3, etc..
+            let offset = addr - (page_num * frame_size); // 0 - frame_size-1
+
+            if page_num < job.page_table.len() as u32 {
+
+                if addr >= job.size {
+                    println!("ERROR: Address {} is within Job {}'s memory region, but is greater than the given program size: {}", addr, job_num, job.size);
+                    return INVALID_ADDR;
+                }
+
+                // Calculate Physical Address: addr --> page --> frame. addr --> offset. (frame * frame_size) + offset
+                let frame_number = job.page_table[page_num as usize]; // 0-based
+                let frame_base = frame_number * frame_size; // Physical frame base address
+                let physical_addr = frame_base + offset;
+
+                println!("=== Address Translation ===");
+                println!("Job {} | Logical Address {}", job_num, addr);
+                println!("Page Number {} | Frame Number {} | Offset {} | Physical Address {}\n", page_num+1, frame_number+1, offset, physical_addr);
+                return OKAY;
+            }
+            else {
+                println!("ERROR: Out of bounds memory access! Job: {} @ address {}", job_num, addr);
+                return INVALID_ADDR;
+            }
+            
+
+        }
+    }
+
+    println!("ERROR: Physical Address can't be computed for Job {} because it doesn't exist", job_num);
+    return INVALID_JOB;
 }
 
 
@@ -392,8 +448,6 @@ fn translate_addr(job_list: &Vec<Job>, job_num: u32, addr: u32) -> (u32, u32) {
 /// # Returns
 /// 
 /// - `u32` - Status code
-/// 
-/// # Examples
 /// 
 fn print_system(job_list: &Vec<Job>, frame_table: &Vec<FrameTableEntry>, job_fifo: &VecDeque<u32>) -> u32 {
     let mut status: u32 = OKAY;
@@ -448,22 +502,11 @@ fn print_system(job_list: &Vec<Job>, frame_table: &Vec<FrameTableEntry>, job_fif
     }
 
     // Print total internal frag.
-    println!("\nTotal internal fragmentation (resident): {} bytes", total_if);
+    println!("\nTotal internal fragmentation (resident): {} bytes\n", total_if);
 
     return status;
 }
 
-
-fn exit() {
-
-}
-
-
-/**
- * Admits jobs into main memory. 
- * Only adds them to the resident FIFO, caller needs to make sure
- * they are in the Job list if they aren't already.
- */
 
 /// Mechanism to actually move jobs into main memory.
 /// Suspends resident jobs in FIFO order until there is sufficient room.

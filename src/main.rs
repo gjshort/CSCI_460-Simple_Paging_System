@@ -1,19 +1,28 @@
 /*
 * Main File for the Paging System Simulator
+*
+* Used Rust Doc string for auto generated function docs
+* 
+* WARNING: MINIMAL TO NO ERROR CHECKING ON BAD CLI ARGUMENTS.
+* RUNTIME CRASHES ARE POSSIBLE.
+* Example: user enters memory_size < frame_size
+* 
 */
 
 use std::collections::VecDeque;
 use std::env;
 use std::fs::File;
-use std::io::{self, BufRead, BufReader};
+use std::io::{self, BufRead, BufReader, Write};
 
 // Memory Controller Visibility
 mod memory_controller; 
 use crate::memory_controller::Job;
 use crate::memory_controller::FrameTableEntry;
 
-fn main() {
+fn main() -> Result<(), io::Error> {
     
+    let mut running: bool = true;
+
     // Paging System Variables
     let mut memory_size: u32 = 0;
     let mut frame_size:  u32 = 0;
@@ -30,10 +39,9 @@ fn main() {
     if args.len() == 4 
     {
 
-        // WARNING: MINIMAL TO NO ERROR CHECKING. BAD CLI ARGUMENTS
-        // MAY CAUSE RUNTIME CRASHES (ex: memory_size < frame_size)
-
         // ------- Set up Memory System -------
+        // 0-based internal indexing. 1-based frame and page number outputs to terminal
+
         memory_size = args[1].parse::<u32>().unwrap();
         frame_size = args[2].parse::<u32>().unwrap();
 
@@ -52,23 +60,55 @@ fn main() {
         }
 
         match input_file_handle(&args[3], &mut job_list, &mut frame_table, &mut resident_jobs, memory_size, frame_size, num_frames, &mut free_frames) {
-            Ok(_) => {},
+            Ok(memory_controller::OKAY) => {},
+            Ok(memory_controller::EXIT) => { println!("CLOSING PROGRAM..."); running = false; },
             Err(e) => eprintln!("Error reading file: {}", e),
+            _=> {},
         }
     }
     else 
     {
         println!("Invalid CLI arguments");
-        return;
+        running = false;
     }
 
-    let mut running: bool = true;
     let mut cmd_input: String = String::new();
-
+    let mut symbols: Vec<&str>;
     // Main Loop
     while running {
-        
+
+        io::stdout().flush()?;
+        io::stdin().read_line(&mut cmd_input)?;
+
+        symbols = cmd_input.split_whitespace().collect();
+        let mut action: u32 = 0;
+        let mut status: u32 = 0;
+
+        // Parsing "print" and "exit"   
+        if symbols.len() == 1 {
+            action = command_parser(symbols[0].to_string(), 0);
+        }
+        // All other commands
+        else if symbols.len() > 1 {
+            let arg1 = symbols[1].parse::<i32>().unwrap();
+            action = command_parser(symbols[0].to_string(), arg1);
+        }
+
+        // Call memory controller on the current command
+        status = memory_controller::mem_control(action, &symbols, &mut job_list, &mut frame_table, &mut resident_jobs,
+                                      memory_size, frame_size, num_frames, &mut free_frames);
+
+        // Return "EXIT" up to caller through the Ok(status)
+        if status == memory_controller::EXIT {
+            running = false;
+        }
+
+        symbols.clear();    // symbols directly references cmd_input, so it must be cleared first
+        cmd_input.clear();  // before Rust will allow cmd_input to be cleared.
+
     }
+
+    Ok(())
 
 }
 
@@ -95,12 +135,12 @@ fn main() {
 /// Possible errors from Buffered Reader line fetching.
 /// 
 fn input_file_handle(in_file: &String, job_list: &mut Vec<Job>, frame_table: &mut Vec<FrameTableEntry>, job_fifo: &mut VecDeque<u32>,
-                     mem_size: u32, frame_size: u32, num_frames: u32, free_frames: &mut u32) -> Result<(), io::Error> {
+                     mem_size: u32, frame_size: u32, num_frames: u32, free_frames: &mut u32) -> Result<u32, io::Error> {
 
     let file = File::open(in_file)?;
     let reader = BufReader::new(file);
 
-    let mut status: u32;
+    let mut status: u32 = memory_controller::OKAY;
 
     for line in reader.lines() {
         let mut action: u32 = 0;
@@ -127,22 +167,18 @@ fn input_file_handle(in_file: &String, job_list: &mut Vec<Job>, frame_table: &mu
         }
 
         // Call memory controller on the current command
-        status = memory_controller::mem_control(action, symbols, job_list, frame_table, job_fifo, mem_size, frame_size, num_frames, free_frames);
-        if status != memory_controller::OKAY {
-            error_handler(status);
+        status = memory_controller::mem_control(action, &symbols, job_list, frame_table, job_fifo, mem_size, frame_size, num_frames, free_frames);
+
+        // Return "EXIT" up to caller through the Ok(status)
+        if status == memory_controller::EXIT {
+            break;
         }
-
-
 
     }
 
-    Ok(())
+    Ok(status)
 }
 
-
-/**
- * Takes in a written command and returns the proper command ID
- */
 
 /// Maps the received command by the program to a memory controller action
 /// 
@@ -189,9 +225,4 @@ fn command_parser(command: String, arg1: i32) -> u32 {
         return memory_controller::ERROR;
     }
 
-}
-
-
-fn error_handler(error_code: u32) {
-    println!("!! === MEMORY CONTROLLER ERROR: {} === !!", error_code);
 }
